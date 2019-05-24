@@ -3,7 +3,7 @@ __precompile__()
 
 module Jfire
 
-export Fire
+export Fire, fire_doc, function_inside
 
 using Dates
 
@@ -13,7 +13,7 @@ function Fire(the_called::Union{Function, Module, Tuple};time::Bool=false, color
 	show_info(info, color, true, version)
 	the_called_type = check_called_type(the_called, ARGS)
 	help_info(the_called, the_called_type, ARGS)
-	need, kws, the_called = parse_args(ARGS, the_called_type, the_called, info, color)
+	need, kws, the_called = parse_args(ARGS, the_called_type, the_called, true, color)
 	
 	if the_called_type  == "module"
 		println("call module")
@@ -119,22 +119,25 @@ end
 
 function module_help(the_called::Module, args::Array{String}, the_called_type::String="")
 	the_name = replace(string(the_called), r"^Main\."=>"")
-	printstyled("\nModule $the_name\n", color=:green)
 	help_level = 0
 	ismatch::Bool = false
 	if (length(args) == 1 || length(args) == 2) && occur_help(args[end])
 		funcs = names(the_called)
+		#println(funcs)
 		if length(args) == 2
 			help_level = 1
 		end
 		for i in firstindex(funcs):lastindex(funcs)
 			func = funcs[i]
 			if length(args) == 2 && args[1] != String(Symbol(func))
+				#println("go next "* String(Symbol(func)))
 				continue
 			end
 			the_type = typeof(getfield(the_called, func))
-			if the_type != Module # is Function
+			#println("the_type is $the_type")
+			if the_type != Module && in(Symbol(func), names(the_called)) # is Function
 				#println("help_level is $help_level")
+				printstyled("\nModule $the_name\n", color=:green)
 				show_function_info(getfield(the_called, Symbol(func)); help_level=help_level, host=the_called)
 				ismatch = true
 			end
@@ -143,8 +146,11 @@ function module_help(the_called::Module, args::Array{String}, the_called_type::S
 	if length(args) >=2 && occur_help(args[2])
 		if occursin(r"\.", args[1])
 			func = replace(args[1], r"^.*\."=>"")
-			show_function_info(getfield(the_called, Symbol(func)); help_level=help_level, host=the_called)
-			ismatch = true
+			if in(Symbol(func), names(the_called))
+				printstyled("\nModule $the_name\n", color=:green)
+				show_function_info(getfield(the_called, Symbol(func)); help_level=help_level, host=the_called)
+				ismatch = true
+			end
 		end
 	end
 	return ismatch
@@ -172,6 +178,9 @@ function parse_args(args::Array{String}, the_called_type::String, the_called::Un
 				myexit("error, $m is not a Module name")
 			end
 			module_name = replace(string(m), r"^Main\."=>"")
+			#println("module_name is $module_name")
+			#println(replace(args[1], r"\..*"=>""))
+			#println(info)
 			if replace(args[1], r"\..*"=>"") == module_name && info
 				printstyled("\nmodule $module_name\n", color=color)
 				if length(args)>=1 &&  replace(string(m), r".*\."=>"") == replace(args[1], r"\..*"=>"")
@@ -234,8 +243,7 @@ function show_function_info(func::Function; help_level::Int=0, host::Module)
 	else
 		#println(methods(func))
 		#println("start doc")
-		#@doc func
-		print(code_lowered(func))
+		#print(code_lowered(func))
 		name = split(String(Symbol(func)), r"\.")[end]
 		println("Function $name:")
 		t = String(Symbol(methods(func)))
@@ -252,17 +260,15 @@ function show_function_info(func::Function; help_level::Int=0, host::Module)
 			had_doc = true
 		end
 		if had_doc
-			docs = getfield(host.thedoc, Symbol(name))
+			#docs = getfield(host.thedoc, Symbol(name))
+			docs = host.thedoc[String(Symbol(name))]
+			#println(docs)
 		end
-		desc = ""
 		if need_args != nothing && need_args[1] != ""
 			println("\nPositional Arguments:")
 			for arg in need_args
-				if had_doc
-					arg_name = split(arg, "::")[1]
-					desc = get(docs, arg_name, "")
-				end
-				print_with_color("\t$arg\t$desc", :green)
+				arg_comment, arg_type, arg_default = get_detail_paramter(arg, had_doc, docs)
+				print_with_color("\t$arg_name::$arg_type\t$arg_default\t$arg_comment", :green)
 			end
 		else
 			println("")
@@ -270,17 +276,43 @@ function show_function_info(func::Function; help_level::Int=0, host::Module)
 		if kw_args != nothing
 			println("Keyword Arguments:(optional)")
 			for k in kw_args
-				if had_doc
-					k_name = split(k, "::")[1]
-					desc = get(docs, k_name, "")
-				end
-				println("\t--$k\t$desc") # use code_lowered(funciton) to get default parameter value
+				 arg_comment, arg_type, arg_default = get_detail_paramter(k, had_doc, docs)
+				println("\t--$k$arg_type\t$arg_default $arg_comment") # use code_lowered(funciton) to get default parameter value
 			end
 			println("")
 		else
 			println("")
 		end
 	end
+end
+function get_detail_paramter(k::SubString, had_doc::Bool, docs::Dict)
+	arg_type = ""
+	arg_default = ""
+	arg_comment = ""
+	if had_doc
+		arg_name = split(k, "::")[1]
+		if haskey(docs, arg_name)
+			if haskey(docs[arg_name], "type")
+				arg_type = docs[arg_name]["type"]
+			end
+			if haskey(docs[arg_name], "default")
+				arg_default = docs[arg_name]["default"]
+			end
+			if haskey(docs[arg_name], "comment")
+				arg_comment = docs[arg_name]["comment"]
+			end
+		end
+	end
+	if arg_comment != "" 
+		arg_comment = " ,$arg_comment"
+	end
+	if arg_type != ""
+		arg_type = "::$arg_type"
+	end
+	if arg_default != ""
+		arg_default = "default $arg_default"
+	end
+	return arg_comment, arg_type, arg_default
 end
 
 function get_help(the_called)
@@ -407,6 +439,60 @@ function help(func::Function)
 	println(func.kwargs)
 	error()
 end
+
+function function_inside(info::SubString, doc::Dict)
+	function_name = match(r"^function\s*([^\(]+)", info)[1]
+	#println(info)
+	infos = split(info, r"[,;()\n]")
+	popfirst!(infos)
+	pop!(infos)
+	doc[function_name] = Dict()
+	for (index, p) in enumerate(infos)
+		if match(r"^\s*#", p) != nothing
+			continue
+		end
+		ps = split(p, r"[:=]")
+		if length(ps) == 4
+			param_name = strip(ps[1])
+			param_type = strip(ps[3])
+			param_default = strip(ps[4])
+			doc[function_name][param_name] = Dict()
+			doc[function_name][param_name]["type"] = param_type
+			doc[function_name][param_name]["default"] = param_default
+		elseif length(ps) == 3
+			param_name = strip(ps[1])
+			param_type = strip(ps[3])
+			doc[function_name][param_name] = Dict()
+			doc[function_name][param_name]["type"] = param_type
+		elseif length(ps) == 1
+			param_name = strip(ps[1])
+			doc[function_name][param_name] = Dict()
+		else
+			println("error: info -> $info")
+			sys.exit(1)
+		end
+		if length(infos) > index && match(r"^\s*#", infos[index+1]) != nothing
+			doc[function_name][param_name]["comment"] = replace(infos[index+1], r"^\s*#*"=>"")
+		end
+	end
+
+	return doc
+end
+function fire_doc(path::String)
+	doc = Dict()
+	#println("start fire doc")
+	io = open(path, "r")
+	content = read(io, String)
+	for f in  eachmatch(r"(function\s*\S+\s*\([^\)]*\))", content)
+		#println(f.match)#function base_freq(fasta::String; prefix::String="auto", outdir::String="./", chr_id::String="", base::String="ATCGN",### coment  ignore_case::Bool=true, window_size::Integer=0)
+		doc = function_inside(f.match, doc)
+	end
+
+	#println("end fire doc")
+	return doc
+
+end
+
 
 
 end

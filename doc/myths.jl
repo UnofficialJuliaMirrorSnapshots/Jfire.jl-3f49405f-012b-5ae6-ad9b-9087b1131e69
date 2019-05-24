@@ -1,14 +1,21 @@
 using Jfire
+thedoc = Jfire.fire_doc(@__FILE__)
 
 module myth1
-export hello1
+export hello1, thedoc
+using Jfire
+thedoc = Jfire.fire_doc(@__FILE__)
+
 function hello1(;name::String="sikaiwei", greet::String="how is the weather?", number::Number=3)
 	println("hello, $name. $greet. $number")
 end
 end
 
 module myth2
-export hello2
+export hello2, thedoc
+using Jfire
+thedoc = Jfire.fire_doc(@__FILE__)
+
 function hello2(;name::String="sikaiwei", greet::String="how is the weather?", number::Float32=3.0)
 	println("hello, $name. $greet. $number")
 end
